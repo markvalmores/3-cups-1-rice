@@ -1,0 +1,36 @@
+{
+  "entities": {
+    "Score": {
+      "title": "Score",
+      "description": "A player's high score in the game.",
+      "type": "object",
+      "properties": {
+        "playerName": {
+          "type": "string",
+          "description": "The name of the player."
+        },
+        "score": {
+          "type": "integer",
+          "description": "The high score achieved."
+        },
+        "difficulty": {
+          "type": "string",
+          "enum": ["easy", "normal", "hard", "insanity"],
+          "description": "The difficulty level the score was achieved on."
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the score was recorded."
+        }
+      },
+      "required": ["playerName", "score", "difficulty", "timestamp"]
+    }
+  },
+  "firestore": {
+    "/leaderboard/{scoreId}": {
+      "schema": "Score",
+      "description": "A collection of high scores for the leaderboard."
+    }
+  }
+}

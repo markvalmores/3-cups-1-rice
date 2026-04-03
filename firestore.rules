@@ -1,0 +1,63 @@
+// ===============================================================
+// Assumed Data Model
+// ===============================================================
+//
+// This security rules file assumes the following data structures:
+//
+// Collection: leaderboard
+// Document ID: auto-generated
+// Fields:
+//   - playerName: string (required, 1-20 chars) - The name of the player.
+//   - score: number (required, positive) - The high score achieved.
+//   - difficulty: string (required, enum) - The difficulty level.
+//   - timestamp: timestamp (required) - When the score was recorded.
+//   - uid: string (required) - The UID of the player.
+//
+// ===============================================================
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isValidScore(data) {
+      return data.playerName is string && 
+             data.playerName.size() >= 1 && 
+             data.playerName.size() <= 20 &&
+             data.score is number && 
+             data.score >= 0 &&
+             data.difficulty in ['easy', 'normal', 'hard', 'insanity'] &&
+             data.timestamp is timestamp &&
+             data.guestId is string &&
+             data.guestId.size() > 0;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /leaderboard/{scoreId} {
+      // Allow public read and create as per user request for "no login"
+      allow read: if true;
+      allow create: if isValidScore(request.resource.data);
+      
+      // Scores are immutable once posted
+      allow update, delete: if false;
+    }
+
+    match /users/{userId} {
+      allow read, write: if isOwner(userId);
+    }
+  }
+}

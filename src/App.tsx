@@ -5,8 +5,10 @@
 
 import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Trophy, Play, RotateCcw, Eye, Zap, Skull, Settings2, Volume2, VolumeX, Gamepad2 } from 'lucide-react';
+import { Trophy, Play, RotateCcw, Eye, Zap, Skull, Settings2, Volume2, VolumeX, Gamepad2, User, List, X } from 'lucide-react';
 import confetti from 'canvas-confetti';
+import { db } from './firebase';
+import { collection, addDoc, query, orderBy, limit, onSnapshot, serverTimestamp, Timestamp } from 'firebase/firestore';
 
 // Assets
 const CHARACTER_URL = "https://en-portal.g.kuroco-img.app/v=1749211658/files/user/character/riceshower/riceshower_03.png";
@@ -55,11 +57,23 @@ const DIFFICULTY_CONFIGS: Record<Difficulty, DifficultyConfig> = {
   },
 };
 
-type GameState = 'title' | 'idle' | 'showing' | 'shuffling' | 'guessing' | 'result';
+type GameState = 'title' | 'name_input' | 'idle' | 'showing' | 'shuffling' | 'guessing' | 'result';
+
+interface LeaderboardEntry {
+  id: string;
+  playerName: string;
+  score: number;
+  difficulty: string;
+  timestamp: Timestamp;
+}
 
 export default function App() {
   const [difficulty, setDifficulty] = useState<Difficulty>('normal');
   const [gameState, setGameState] = useState<GameState>('title');
+  const [playerName, setPlayerName] = useState('');
+  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
+  const [showLeaderboard, setShowLeaderboard] = useState(false);
+  const [guestId, setGuestId] = useState('');
   const [cupPositions, setCupPositions] = useState<number[]>([0, 1, 2]);
   const [targetCup, setTargetCup] = useState<number>(1); // Index of the cup containing the character
   const [selectedCup, setSelectedCup] = useState<number | null>(null);
@@ -75,11 +89,56 @@ export default function App() {
     audio.loop = true;
     audioRef.current = audio;
 
+    // Guest ID setup
+    let id = localStorage.getItem('guestId');
+    if (!id) {
+      id = 'guest_' + Math.random().toString(36).substring(2, 15);
+      localStorage.setItem('guestId', id);
+    }
+    setGuestId(id);
+
     return () => {
       audio.pause();
       audioRef.current = null;
     };
   }, []);
+
+  // Fetch Leaderboard
+  useEffect(() => {
+    const q = query(
+      collection(db, 'leaderboard'),
+      orderBy('score', 'desc'),
+      limit(10)
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const entries: LeaderboardEntry[] = [];
+      snapshot.forEach((doc) => {
+        entries.push({ id: doc.id, ...doc.data() } as LeaderboardEntry);
+      });
+      setLeaderboard(entries);
+    }, (error) => {
+      console.error("Leaderboard fetch error:", error);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  const saveScore = async (finalScore: number) => {
+    if (!playerName || finalScore <= 0) return;
+
+    try {
+      await addDoc(collection(db, 'leaderboard'), {
+        playerName,
+        score: finalScore,
+        difficulty,
+        timestamp: serverTimestamp(),
+        guestId
+      });
+    } catch (error) {
+      console.error("Error saving score:", error);
+    }
+  };
 
   const toggleMute = () => {
     if (audioRef.current) {
@@ -89,9 +148,16 @@ export default function App() {
   };
 
   const startFromTitle = () => {
-    setGameState('idle');
+    setGameState('name_input');
     if (audioRef.current) {
       audioRef.current.play().catch(err => console.log("Audio play blocked:", err));
+    }
+  };
+
+  const handleNameSubmit = (e: { preventDefault: () => void }) => {
+    e.preventDefault();
+    if (playerName.trim().length >= 1 && playerName.trim().length <= 20) {
+      setGameState('idle');
     }
   };
 
@@ -154,7 +220,8 @@ export default function App() {
 
     if (index === targetCup) {
       setMessage("You found her! Amazing!");
-      setScore(s => s + 1);
+      const newScore = score + 1;
+      setScore(newScore);
       confetti({
         particleCount: 100,
         spread: 70,
@@ -163,6 +230,9 @@ export default function App() {
       });
     } else {
       setMessage("Oh no! Better luck next time.");
+      if (score > 0) {
+        saveScore(score);
+      }
       setScore(0);
     }
   };
@@ -192,14 +262,28 @@ export default function App() {
           animate={{ y: 0, opacity: 1 }}
           className="text-center relative w-full"
         >
-          {/* Mute Button */}
-          <button 
-            onClick={toggleMute}
-            className="absolute right-0 top-0 p-2 bg-white/10 backdrop-blur-md border border-white/20 rounded-full text-white hover:bg-white/20 transition-all z-30"
-            title={isMuted ? "Unmute" : "Mute"}
-          >
-            {isMuted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
-          </button>
+          {/* Top Buttons */}
+          <div className="absolute right-0 top-0 flex gap-2 z-30">
+            <button 
+              onClick={() => setShowLeaderboard(true)}
+              className="p-2 bg-white/10 backdrop-blur-md border border-white/20 rounded-full text-white hover:bg-white/20 transition-all"
+              title="Leaderboard"
+            >
+              <List className="w-5 h-5" />
+            </button>
+            <button 
+              onClick={toggleMute}
+              className="p-2 bg-white/10 backdrop-blur-md border border-white/20 rounded-full text-white hover:bg-white/20 transition-all"
+              title={isMuted ? "Unmute" : "Mute"}
+            >
+              {isMuted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
+            </button>
+          </div>
+
+          <div className="absolute left-0 top-0 flex items-center gap-2 bg-white/10 backdrop-blur-md border border-white/20 px-3 py-1.5 rounded-full text-white text-xs font-bold z-30">
+            <User className="w-4 h-4 text-pink-400" />
+            <span className="max-w-[80px] truncate">{playerName}</span>
+          </div>
 
           <h1 className="text-2xl sm:text-4xl md:text-5xl font-black text-white drop-shadow-[0_4px_4px_rgba(0,0,0,0.8)] tracking-tighter mb-1 md:mb-2 uppercase">
             3 CUPS <span className="text-pink-400">1 RICE</span>
@@ -442,6 +526,160 @@ export default function App() {
         )}
       </AnimatePresence>
 
+      {/* Name Input Screen */}
+      <AnimatePresence>
+        {gameState === 'name_input' && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0, scale: 0.9 }}
+            className="fixed inset-0 z-[110] bg-black/90 backdrop-blur-2xl flex flex-col items-center justify-center text-white p-6 text-center"
+          >
+            <motion.div
+              initial={{ scale: 0.5, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              className="w-full max-w-md bg-white/5 border border-white/10 p-8 rounded-3xl shadow-2xl"
+            >
+              <div className="mb-6 bg-pink-500/20 w-20 h-20 rounded-full flex items-center justify-center mx-auto border border-pink-500/30">
+                <User className="w-10 h-10 text-pink-400" />
+              </div>
+              <h2 className="text-3xl font-black mb-2">WHO ARE YOU?</h2>
+              <p className="text-white/60 mb-8">Enter your name for the leaderboard</p>
+              
+              <form onSubmit={handleNameSubmit} className="space-y-6">
+                <input 
+                  type="text" 
+                  value={playerName}
+                  onChange={(e) => setPlayerName(e.target.value)}
+                  placeholder="Your Name"
+                  maxLength={20}
+                  required
+                  autoFocus
+                  className="w-full bg-white/10 border border-white/20 rounded-2xl px-6 py-4 text-xl font-bold text-center focus:outline-none focus:ring-4 focus:ring-pink-500/50 transition-all placeholder:text-white/20"
+                />
+                <motion.button
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  type="submit"
+                  disabled={playerName.trim().length < 1}
+                  className="w-full py-4 bg-pink-500 text-white font-black text-xl rounded-2xl shadow-[0_6px_0_rgb(190,24,93)] hover:shadow-[0_3px_0_rgb(190,24,93)] hover:translate-y-1 active:shadow-none active:translate-y-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  CONTINUE
+                </motion.button>
+              </form>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Leaderboard Overlay */}
+      <AnimatePresence>
+        {showLeaderboard && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[120] bg-black/90 backdrop-blur-xl flex items-center justify-center p-4 md:p-8"
+          >
+            <motion.div 
+              initial={{ scale: 0.9, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              className="w-full max-w-2xl bg-stone-900 border border-white/10 rounded-[2.5rem] overflow-hidden shadow-2xl flex flex-col max-h-[90vh]"
+            >
+              <div className="p-6 md:p-8 border-b border-white/5 flex items-center justify-between bg-gradient-to-r from-pink-500/10 to-transparent">
+                <div className="flex items-center gap-4">
+                  <div className="bg-yellow-400/20 p-3 rounded-2xl">
+                    <Trophy className="w-8 h-8 text-yellow-400" />
+                  </div>
+                  <div>
+                    <h2 className="text-2xl md:text-3xl font-black text-white tracking-tight">LEADERBOARD</h2>
+                    <p className="text-white/40 text-sm font-medium">Top 10 Global Players</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setShowLeaderboard(false)}
+                  className="p-2 hover:bg-white/5 rounded-full text-white/40 hover:text-white transition-colors"
+                >
+                  <X className="w-8 h-8" />
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-4 md:p-8 space-y-3">
+                {leaderboard.length === 0 ? (
+                  <div className="text-center py-20 text-white/20 italic">
+                    No scores yet. Be the first!
+                  </div>
+                ) : (
+                  leaderboard.map((entry, idx) => {
+                    const isTop1 = idx === 0;
+                    const isTop2 = idx === 1;
+                    const isTop3 = idx === 2;
+                    const isCurrentUser = (entry as any).guestId === guestId;
+
+                    return (
+                      <motion.div 
+                        initial={{ x: -20, opacity: 0 }}
+                        animate={{ x: 0, opacity: 1 }}
+                        transition={{ delay: idx * 0.05 }}
+                        key={entry.id}
+                        className={`flex items-center justify-between p-4 rounded-2xl border relative overflow-hidden ${
+                          isTop1 ? 'bg-yellow-400/10 border-yellow-400/30' : 
+                          isTop2 ? 'bg-gray-300/10 border-gray-300/30' : 
+                          isTop3 ? 'bg-orange-400/10 border-orange-400/30' : 
+                          isCurrentUser ? 'bg-pink-500/10 border-pink-500/30' : 
+                          'bg-white/5 border-white/5'
+                        }`}
+                      >
+                        {/* Shine effect for Top 1 */}
+                        {isTop1 && (
+                          <motion.div 
+                            animate={{ x: ['-100%', '200%'] }}
+                            transition={{ repeat: Infinity, duration: 3, ease: "linear" }}
+                            className="absolute inset-0 bg-gradient-to-r from-transparent via-yellow-400/10 to-transparent skew-x-12"
+                          />
+                        )}
+
+                        <div className="flex items-center gap-4 relative z-10">
+                          <span className={`w-8 text-center font-black text-xl ${
+                            isTop1 ? 'text-yellow-400' : 
+                            isTop2 ? 'text-gray-300' : 
+                            isTop3 ? 'text-orange-400' : 
+                            'text-white/20'
+                          }`}>
+                            #{idx + 1}
+                          </span>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <p className="font-bold text-white text-lg leading-none">{entry.playerName}</p>
+                              {isCurrentUser && (
+                                <span className="bg-pink-500 text-[8px] px-1.5 py-0.5 rounded-full font-black uppercase">YOU</span>
+                              )}
+                            </div>
+                            <p className="text-[10px] uppercase tracking-widest font-black text-white/30 mt-1">{entry.difficulty}</p>
+                          </div>
+                        </div>
+                        <div className="text-right relative z-10">
+                          <p className={`text-2xl font-black leading-none ${
+                            isTop1 ? 'text-yellow-400' : 
+                            isTop2 ? 'text-gray-300' : 
+                            isTop3 ? 'text-orange-400' : 
+                            'text-pink-400'
+                          }`}>{entry.score}</p>
+                          <p className="text-[10px] text-white/20 font-medium">STREAK</p>
+                        </div>
+                      </motion.div>
+                    );
+                  })
+                )}
+              </div>
+
+              <div className="p-6 bg-black/40 border-t border-white/5 text-center">
+                <p className="text-white/30 text-xs font-medium">Scores are saved automatically when your streak ends</p>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
       <style dangerouslySetInnerHTML={{ __html: `
         .perspective-1000 {
           perspective: 1000px;
