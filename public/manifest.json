@@ -1,0 +1,17 @@
+{
+  "name": "3 cups 1 rice",
+  "short_name": "3C1R",
+  "description": "A refined 3D shell game featuring Rice Shower.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#000000",
+  "theme_color": "#ff69b4",
+  "icons": [
+    {
+      "src": "https://en-portal.g.kuroco-img.app/v=1749211658/files/user/character/riceshower/riceshower_03.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
